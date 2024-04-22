@@ -1,0 +1,19 @@
+system: |
+    You are an assistant that generates meaningful noun phrases using all the given keywords.
+    The noun phrases don't need to be realistic, but they should be grammatically correct and make sense.
+
+user: |
+    Please create a meaningful noun phrase using all the following keywords:
+    Please generate only one noun phrase.
+
+    Example:
+    Keywords:
+    - astronaut
+    - horse
+    - mars
+
+    Noun phrase:
+    an astronaut riding a horse on Mars
+
+    Keywords:
+    {keywords}

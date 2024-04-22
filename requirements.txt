@@ -1,0 +1,9 @@
+torch
+torchvision
+ftfy
+regex
+tqdm
+transformers
+diffusers
+accelerate
+git+https://github.com/openai/CLIP.git
