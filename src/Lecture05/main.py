@@ -1,5 +1,6 @@
 import os
 import random
+import sys
 
 import numpy as np
 import pandas as pd
@@ -10,8 +11,16 @@ import torch.nn.functional as F
 import torch.optim as optim
 from PIL import Image
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm_notebook as tqdm
+
+sys.path.append("../")
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
+from my_utils import setup_device
+
+device = setup_device()
 
 # 学習データ
 data_dir = "./data"
@@ -22,7 +31,7 @@ y_train = np.load(os.path.join(data_dir, "t_train.npy"))
 x_test = np.load(os.path.join(data_dir, "x_test.npy"))
 
 
-class train_dataset(torch.utils.data.Dataset):
+class train_dataset(Dataset):
     def __init__(self, x_train, y_train):
         data = x_train.astype("float32")
         self.x_train = []
@@ -38,7 +47,7 @@ class train_dataset(torch.utils.data.Dataset):
         return self.transform(self.x_train[idx]), torch.tensor(y_train[idx], dtype=torch.long)
 
 
-class test_dataset(torch.utils.data.Dataset):
+class test_dataset(Dataset):
     def __init__(self, x_test):
         data = x_test.astype("float32")
         self.x_test = []
@@ -79,7 +88,7 @@ class gcn:
 
 
 class ZCAWhitening:
-    def __init__(self, epsilon=1e-4, device="cuda" if torch.cuda.is_available() else "cpu"):  # 計算が重いのでGPUを用いる
+    def __init__(self, epsilon=1e-4, device=device):  # 計算が重いのでGPUを用いる
         self.epsilon = epsilon
         self.device = device
 
@@ -127,36 +136,47 @@ test_data.transform = transform
 
 batch_size = 64
 
-dataloader_train = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+dataloader_train = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
-dataloader_valid = torch.utils.data.DataLoader(val_data, batch_size=batch_size, shuffle=True)
+dataloader_valid = DataLoader(val_data, batch_size=batch_size, shuffle=True)
 
-dataloader_test = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False)
+dataloader_test = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
 rng = np.random.RandomState(1234)
 random_state = 42
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device(device)
 
 
 conv_net = nn.Sequential(
     nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
+    nn.BatchNorm2d(64),
     nn.ReLU(),
     nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+    nn.BatchNorm2d(64),
     nn.ReLU(),
     nn.MaxPool2d(kernel_size=2, stride=2),
+    nn.Dropout(0.3),
     nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+    nn.BatchNorm2d(128),
     nn.ReLU(),
     nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+    nn.BatchNorm2d(128),
     nn.ReLU(),
     nn.MaxPool2d(kernel_size=2, stride=2),
+    nn.Dropout(0.4),
     nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+    nn.BatchNorm2d(256),
     nn.ReLU(),
     nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+    nn.BatchNorm2d(256),
     nn.ReLU(),
     nn.MaxPool2d(kernel_size=2, stride=2),
+    nn.Dropout(0.5),
     nn.Flatten(),
-    nn.Linear(4096, 512),
+    nn.Linear(256 * 4 * 4, 512),
     nn.ReLU(),
+    nn.Dropout(0.5),
     nn.Linear(512, 10),
 )
 
@@ -172,10 +192,12 @@ conv_net.apply(init_weights)
 
 n_epochs = 5
 lr = 0.01
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+device = setup_device()
 
 conv_net.to(device)
 optimizer = optim.Adam(conv_net.parameters(), lr=lr)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 loss_function = nn.CrossEntropyLoss()
 
 for epoch in range(n_epochs):
@@ -192,6 +214,9 @@ for epoch in range(n_epochs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        import pdb
+
+        pdb.set_trace()
 
         pred = y.argmax(1)
         acc_train += (pred == t).float().sum().item()
@@ -209,6 +234,8 @@ for epoch in range(n_epochs):
         acc_val += (pred == t).float().sum().item()
         n_val += len(x)
         losses_valid.append(loss.tolist())
+
+    scheduler.step()
 
     print(
         "EPOCH: {}, Train [Loss: {:.3f}, Accuracy: {:.3f}], Valid [Loss: {:.3f}, Accuracy: {:.3f}]".format(
